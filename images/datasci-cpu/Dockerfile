@@ -34,4 +34,15 @@ RUN printf 'envs_dirs:\n  - ~/.conda/envs\npkgs_dirs:\n  - ~/.conda/pkgs\n' > "$
 # which is on the home PVC, so downloaded wheels/interpreters persist across restarts.
 COPY --from=ghcr.io/astral-sh/uv:latest /uv /uvx /usr/local/bin/
 
+# JupyterLab baked via uv as an isolated tool (its own env + a uv-managed Python at system paths),
+# so it is decoupled from the base conda env and on PATH as /usr/local/bin/jupyter-lab. The Coder
+# jupyterlab registry module is not used: in path mode it hardcodes its healthcheck at the root
+# /api while serving under a base_url prefix, so the app is always reported unhealthy. The
+# template starts this baked JupyterLab itself with a matching healthcheck instead.
+ENV UV_TOOL_DIR=/opt/uv/tools \
+    UV_TOOL_BIN_DIR=/usr/local/bin \
+    UV_PYTHON_INSTALL_DIR=/opt/uv/python
+RUN uv tool install jupyterlab \
+ && test -x /usr/local/bin/jupyter-lab
+
 USER coder
