@@ -12,6 +12,61 @@ FROM codercom/enterprise-base:ubuntu
 
 USER root
 
+# --- timezone ---------------------------------------------------------------------------------
+# The base image is UTC. Researchers are in NZ, so make wall-clock times in logs, notebook output
+# and scheduled jobs local. TZ is exported (glibc and Python read it) and /etc/localtime is
+# repointed for anything that reads the file directly.
+ENV TZ=Pacific/Auckland
+RUN ln -sf "/usr/share/zoneinfo/${TZ}" /etc/localtime \
+ && echo "${TZ}" > /etc/timezone
+
+# --- system tools -----------------------------------------------------------------------------
+# The base already ships build-essential, gcc/g++, git, curl, wget, jq, less, htop, rsync, unzip,
+# vim and openssh-client. Added here, in rough order of why:
+#   tmux            the Coder web terminal drops its session on reload, killing long conda solves,
+#                   uv syncs and model fits; tmux lets researchers detach instead
+#   bash-completion the completion loader itself (see the shell defaults section below)
+#   git-lfs         datasets and model weights clone as pointer files without it
+#   gfortran        conda-forge ships wheels, but `uv pip install` falls back to compiling from
+#   pkg-config      source, and scientific packages need a Fortran compiler plus these to build
+#   cmake
+#   ncdu            the home PVC is quota-bound and conda envs / uv caches fill it; researchers
+#                   need to see what is eating the volume
+#   pandoc          nbconvert to anything but HTML requires it. No LaTeX: texlive is far too large
+#                   for a base image, so PDF export is not covered
+#   ripgrep         search and file-wrangling basics
+#   fd-find         installs as `fdfind` on Debian/Ubuntu (name clash with fdclone), so it is
+#                   symlinked to the `fd` everyone actually types
+#   tree
+#   zip
+#
+# zstd is deliberately absent: miniforge ships one at /opt/conda/bin/zstd, which precedes /usr/bin
+# on PATH, so the apt package would never be the one that runs.
+RUN apt-get update \
+ && apt-get install --yes --no-install-recommends \
+      bash-completion \
+      cmake \
+      fd-find \
+      gfortran \
+      git-lfs \
+      ncdu \
+      pandoc \
+      pkg-config \
+      ripgrep \
+      tmux \
+      tree \
+      zip \
+ && rm -rf /var/lib/apt/lists/* \
+ && ln -s "$(command -v fdfind)" /usr/local/bin/fd
+
+# --- interactive shell defaults ---------------------------------------------------------------
+# Ubuntu puts the bash-completion hook and `alias ls --color=auto` in ~/.bashrc, which the image
+# seeds from /etc/skel. The home PVC mounts over /home/coder and masks it, so in a workspace
+# neither ever runs. Set them system-wide in /etc/bash.bashrc instead: interactive shells read it
+# directly and login shells get it via /etc/profile.
+RUN echo ". /usr/share/bash-completion/bash_completion" >> /etc/bash.bashrc \
+ && echo "alias ls='ls --color=auto'" >> /etc/bash.bashrc
+
 # --- miniforge (conda) at a system path -------------------------------------------------------
 # Installed to /opt/conda, owned by root. Because the runtime user (coder, UID 1000) does not own
 # /opt/conda, conda transparently creates new environments under ~/.conda/envs — i.e. on the home
@@ -39,6 +94,11 @@ RUN conda config --system --prepend envs_dirs '~/.conda/envs' \
 # Official static binaries copied from the upstream image. uv's cache defaults to ~/.cache/uv,
 # which is on the home PVC, so downloaded wheels/interpreters persist across restarts.
 COPY --from=ghcr.io/astral-sh/uv:latest /uv /uvx /usr/local/bin/
+
+# uv's own completions, written to the bash-completion lookup dir so the loader sources them on
+# first use of `uv`/`uvx` rather than in every shell startup.
+RUN uv generate-shell-completion bash > /usr/share/bash-completion/completions/uv \
+ && uvx --generate-shell-completion bash > /usr/share/bash-completion/completions/uvx
 
 # JupyterLab baked via uv as an isolated tool, on PATH as /usr/local/bin/jupyter-lab. The Coder
 # jupyterlab registry module is not used: in path mode it hardcodes its healthcheck at the root
