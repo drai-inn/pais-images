@@ -4,18 +4,46 @@ on:
   push:
     branches: [main]
     paths:
-      - "images/datasci-cpu/**"
+      - "images/**"
       - ".github/workflows/build.yml"
     tags:
       - "datasci-cpu-v*"
+      - "slicer-desktop-v*"
   workflow_dispatch:
 
 permissions:
   contents: read
   packages: write
 
+# Which images changed. Every push to main is an image RELEASE (workspaces pull :latest with
+# imagePullPolicy: Always), so a build must only run for images whose own source actually moved.
+# Nothing in these Dockerfiles pins apt, and uv/miniforge/Slicer/KasmVNC/VirtualGL all move
+# upstream independently, so an unnecessary rebuild silently ships a different image.
+#
+# Note what is deliberately NOT a trigger: this workflow file. Editing CI is not a reason to
+# republish every image. Use the workflow_dispatch button when a CI change needs a rebuild proving.
+# On a tag push there is no diff to compute, so every image builds.
 jobs:
+  changes:
+    runs-on: ubuntu-latest
+    outputs:
+      datasci-cpu: ${{ steps.filter.outputs.datasci-cpu }}
+      slicer-desktop: ${{ steps.filter.outputs.slicer-desktop }}
+    steps:
+      - uses: actions/checkout@v7
+
+      - id: filter
+        uses: dorny/paths-filter@v3
+        with:
+          filters: |
+            datasci-cpu:
+              - 'images/datasci-cpu/**'
+            slicer-desktop:
+              - 'images/slicer-desktop/**'
+
   datasci-cpu:
+    needs: changes
+    if: needs.changes.outputs.datasci-cpu == 'true' || startsWith(github.ref, 'refs/tags/')
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
@@ -40,6 +68,39 @@ jobs:
       - uses: docker/build-push-action@v7
         with:
           context: images/datasci-cpu
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+  slicer-desktop:
+    needs: changes
+    if: needs.changes.outputs.slicer-desktop == 'true' || startsWith(github.ref, 'refs/tags/')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: docker/setup-buildx-action@v4
+
+      - uses: docker/login-action@v4
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - id: meta
+        uses: docker/metadata-action@v6
+        with:
+          images: ghcr.io/drai-inn/pais-images/slicer-desktop
+          tags: |
+            type=raw,value=latest,enable={{is_default_branch}}
+            type=sha
+            type=ref,event=tag
+
+      - uses: docker/build-push-action@v7
+        with:
+          context: images/slicer-desktop
           push: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
