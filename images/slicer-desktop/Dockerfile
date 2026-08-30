@@ -6,6 +6,14 @@
 # with sudo on every start, so without baking it the desktop simply never comes up. Same story for
 # VirtualGL and Slicer itself.
 #
+# Three stages:
+#   base            everything shared: system deps, KasmVNC, VirtualGL, Slicer itself
+#   open3d-builder  compiles open3d against Slicer's bundled Python and emits a wheel
+#   runtime         base + that wheel + trimesh + the launcher. This is what ships.
+#
+# The builder exists only because open3d cannot be pip installed into Slicer; see its stage header.
+# None of the toolchain or the ~3 GB open3d build tree reaches the runtime stage.
+#
 # Built on codercom/enterprise-desktop:ubuntu-noble, which is enterprise-base (UID-1000 `coder`,
 # HOME=/home/coder, git/curl/sudo) plus XFCE. It does NOT contain a VNC server; that comes from the
 # KasmVNC package below.
@@ -15,11 +23,18 @@
 # its download URL from $VERSION_CODENAME, so on resolute it 404s. Verified against the upstream
 # release asset list 2026-08-17. Date-stamped tags (ubuntu-noble-YYYYMMDD) exist if we ever want
 # full build reproducibility; the codename pin is the part that actually matters here.
-FROM codercom/enterprise-desktop:ubuntu-noble
+
+# Declared before the first FROM so both `base` and `runtime` can pick it up with a bare ARG.
+ARG SLICER_VERSION=5.12.3
+
+# ==================================================================================================
+# base
+# ==================================================================================================
+FROM codercom/enterprise-desktop:ubuntu-noble AS base
 
 USER root
 
-ARG SLICER_VERSION=5.12.3
+ARG SLICER_VERSION
 ARG SLICER_REVISION=34627
 # Version-specific bitstream id and checksum from https://download.slicer.org/find?os=linux&arch=amd64&stability=release
 ARG SLICER_BITSTREAM=6a6159372eb3d967f032505f
@@ -118,16 +133,161 @@ RUN curl -fsSL -o /tmp/slicer.tar.gz \
  && test -x /opt/slicer/Slicer \
  && test -x /opt/slicer/bin/PythonSlicer
 
-# trimesh into Slicer's own interpreter. Pure Python, so it installs cleanly.
+# ==================================================================================================
+# open3d-builder
+# ==================================================================================================
+# open3d CANNOT be pip installed into Slicer. Slicer ships a generated `_manylinux.py` that
+# hard-codes a glibc 2.28 ceiling, so its pip advertises manylinux_2_28 as its maximum whatever the
+# host glibc actually is. open3d 0.19.0 is the only release with cp312 wheels and is tagged
+# manylinux_2_31; every release back to 0.18.0 is manylinux_2_27 but stops at cp311. Nothing
+# satisfies both, and `pip install open3d` fails with "No matching distribution found". Verified
+# 2026-08-17. Do not "fix" this by editing the shim.
 #
-# open3d is deliberately absent and CANNOT be added. Slicer ships a generated _manylinux.py that
-# hard-codes a glibc 2.28 ceiling to avoid ABI-mismatch crashes, so its pip advertises
-# manylinux_2_28 as its maximum whatever the host glibc is. open3d 0.19.0 is the only release with
-# cp312 wheels and is tagged manylinux_2_31; every release back to 0.18.0 is manylinux_2_27 but
-# stops at cp311. Nothing satisfies both, and `pip install open3d` fails with "No matching
-# distribution found". Verified 2026-08-17. Do not "fix" this by editing the shim.
-RUN /opt/slicer/bin/PythonSlicer -m pip install --no-cache-dir --no-input trimesh \
- && /opt/slicer/bin/PythonSlicer -c "import trimesh; print(trimesh.__version__)"
+# Building it here is a different proposition. That ceiling exists to stop wheels compiled against a
+# newer libstdc++/glibc ABI from crashing Slicer, and Slicer bundles neither libstdc++ nor libgcc, it
+# links the system ones. Compiling against this exact base therefore produces a wheel with the same
+# ABI Slicer itself runs on, which is the thing the ceiling is trying to guarantee.
+#
+# Verified in-process on 2026-08-18, not merely imported: open3d 0.19.0 loads inside a running Slicer
+# 5.12.3 alongside its own Qt5, VTK 9.6 and ITK, with no symbol clash; geometry, voxel downsampling
+# and ICP registration all run; and the resulting vertices round-trip into a vtkMRMLModelNode.
+#
+# (On aarch64 the PyPI version matrix does line up, which is why open3d already pip installs in
+# Slicer on the researcher's IGX and this stage is an x86_64 problem only.)
+FROM base AS open3d-builder
+
+ARG OPEN3D_VERSION=v0.19.0
+ARG CPYTHON_VERSION=3.12.10
+# Checksum computed from this URL on 2026-08-19. Pinned to detect the tarball changing under us,
+# same rationale as the Slicer bitstream pin above.
+ARG CPYTHON_SHA256=15d9c623abfd2165fe816ea1fb385d6ed8cf3c664661ab357f1782e3036a6dac
+
+# ⚠️ THE WAYLAND PACKAGES ARE NOT OPTIONAL, despite BUILD_GUI=OFF and despite this never rendering
+# anything. BUILD_GUI=OFF drops filament and O3DVisualizer but NOT the legacy Visualizer, which open3d
+# still builds, and that pulls in glfw as an ExternalProject. glfw 3.4 defaults GLFW_BUILD_WAYLAND=ON
+# on Linux and open3d does not pass anything to turn it off, so glfw's configure hard-fails with
+# "Failed to find wayland-scanner" about 27 seconds in. wayland-scanner comes from libwayland-bin.
+#
+# The X11 and OSMesa dev packages are in the same category: unused at runtime, required to configure.
+# Nothing in this stage reaches the runtime image, so trimming any of it buys nothing.
+RUN apt-get update \
+ && apt-get install --yes --no-install-recommends \
+      autoconf \
+      build-essential \
+      cmake \
+      libglu1-mesa-dev \
+      libosmesa6-dev \
+      libtbb-dev \
+      libtool \
+      libudev-dev \
+      libwayland-bin \
+      libwayland-dev \
+      libx11-dev \
+      libxcursor-dev \
+      libxi-dev \
+      libxinerama-dev \
+      libxkbcommon-dev \
+      libxrandr-dev \
+      ninja-build \
+      pkg-config \
+      wayland-protocols \
+ && rm -rf /var/lib/apt/lists/*
+
+# --- reconstruct Slicer's Python include tree -------------------------------------------------
+# Slicer strips its own include dir down to pyconfig.h alone, so out of the box there is nothing to
+# compile an extension against. pyconfig.h is the only header whose contents depend on how that
+# interpreter was configured, so pairing Slicer's copy of it with the generic Include/ tree from the
+# EXACTLY matching CPython source release reconstructs a coherent tree. CPython's Include/ contains
+# no pyconfig.h, so copying it in place leaves Slicer's own file untouched.
+#
+# ⚠️ The headers must land in Slicer's OWN include dir. open3d's pybind target reads the legacy
+# PYTHON_INCLUDE_DIRS, which CMake derives by asking the interpreter where its headers live, so it
+# ignores a side directory passed via -DPython3_INCLUDE_DIR. That flag is still set below so the
+# modern FindPython3 path agrees with the legacy one.
+RUN test -f /opt/slicer/lib/Python/include/python3.12/pyconfig.h \
+ && curl -fsSL -o /tmp/cpython.tgz \
+      "https://www.python.org/ftp/python/${CPYTHON_VERSION}/Python-${CPYTHON_VERSION}.tgz" \
+ && echo "${CPYTHON_SHA256}  /tmp/cpython.tgz" | sha256sum --check --strict \
+ && tar -xzf /tmp/cpython.tgz -C /tmp \
+ && cp -r "/tmp/Python-${CPYTHON_VERSION}/Include/." /opt/slicer/lib/Python/include/python3.12/ \
+ && rm -rf /tmp/cpython.tgz "/tmp/Python-${CPYTHON_VERSION}" \
+ && test -f /opt/slicer/lib/Python/include/python3.12/Python.h
+
+# Compile the smallest possible extension against the reconstructed tree and load it into Slicer's
+# interpreter. An incoherent header tree then fails here in seconds instead of an hour into open3d.
+RUN printf '%s\n' \
+      '#include <Python.h>' \
+      'static PyMethodDef M[] = {{NULL, NULL, 0, NULL}};' \
+      'static struct PyModuleDef mod = {PyModuleDef_HEAD_INIT, "probe", NULL, -1, M};' \
+      'PyMODINIT_FUNC PyInit_probe(void) { return PyModule_Create(&mod); }' \
+      > /tmp/probe.c \
+ && gcc -shared -fPIC -I/opt/slicer/lib/Python/include/python3.12 \
+      /tmp/probe.c -o /tmp/probe.cpython-312-x86_64-linux-gnu.so \
+ && PYTHONPATH=/tmp /opt/slicer/bin/PythonSlicer -c "import probe" \
+ && rm -f /tmp/probe.c /tmp/probe.cpython-312-x86_64-linux-gnu.so
+
+# --- build open3d -----------------------------------------------------------------------------
+# BUILD_GUI=OFF drops filament, by far the largest dependency, and with it draw_geometries and
+# O3DVisualizer. A Slicer widget renders in Slicer's own 3D views, so neither is wanted. CUDA is off
+# because the GPU here serves OpenGL through VirtualGL and the compute question is a separate one.
+# WebRTC off follows from GUI off. With CUDA off the package names itself open3d-cpu, not open3d.
+RUN git clone --depth 1 --branch "${OPEN3D_VERSION}" --recurse-submodules --shallow-submodules \
+      https://github.com/isl-org/Open3D.git /opt/open3d \
+ && cmake -S /opt/open3d -B /opt/open3d-build -G Ninja \
+      -DCMAKE_BUILD_TYPE=Release \
+      -DPython3_EXECUTABLE=/opt/slicer/bin/PythonSlicer \
+      -DPython3_INCLUDE_DIR=/opt/slicer/lib/Python/include/python3.12 \
+      -DPython3_LIBRARY=/opt/slicer/lib/Python/lib/libpython3.12.so \
+      -DBUILD_PYTHON_MODULE=ON \
+      -DBUILD_GUI=OFF \
+      -DBUILD_CUDA_MODULE=OFF \
+      -DBUILD_WEBRTC=OFF \
+      -DBUILD_EXAMPLES=OFF \
+      -DBUILD_UNIT_TESTS=OFF \
+      -DBUILD_BENCHMARKS=OFF \
+      -DWITH_OPENMP=ON \
+ && cmake --build /opt/open3d-build --target pip-package -j "$(nproc)"
+
+# ⚠️ THE IRONY IS REAL AND THIS RETAG IS REQUIRED. The wheel just built is tagged manylinux_2_39,
+# because 2.39 is this base's glibc, and Slicer's own 2.28 shim rejects it exactly as it rejects
+# PyPI's. `wheel tags` rewrites both the filename and the internal WHEEL metadata to linux_x86_64,
+# a tag that makes no glibc claim and so never reaches the shim. That is also the honest tag: this
+# wheel is built for this image and is not portable off it.
+RUN mkdir -p /out \
+ && cp /opt/open3d-build/lib/python_package/pip_package/open3d_cpu-*.whl /out/ \
+ && /opt/slicer/bin/PythonSlicer -m wheel tags \
+      --platform-tag linux_x86_64 --remove /out/open3d_cpu-*.whl \
+ && ls -1 /out
+
+# ==================================================================================================
+# runtime
+# ==================================================================================================
+FROM base AS runtime
+
+ARG SLICER_VERSION
+
+# trimesh is pure Python and installs cleanly. open3d comes from the builder stage above.
+#
+# ⚠️ open3d is NOT a self-contained addition. `import open3d` unconditionally imports
+# open3d.visualization, which imports draw_plotly, which imports plotly and then dash at module
+# load. Neither is optional and BUILD_GUI=OFF does not remove them, because it is a Python-side
+# import rather than a compiled feature. Removing them would mean forking
+# open3d/visualization/__init__.py.
+#
+# The measured cost is 31 added packages and site-packages growing 711 MB -> 998 MB, of which plotly
+# is 68 MB, dash 40 MB and open3d itself 154 MB. Verified 2026-08-19 by diffing dist-info against
+# the previous release: all 31 are pure additions and nothing Slicer already shipped was overwritten
+# or downgraded, so this widens the dependency surface without conflicting with Slicer's own
+# environment. If open3d turns out to be unwanted, dropping this stage reverts all of it.
+COPY --from=open3d-builder /out/*.whl /tmp/wheels/
+RUN /opt/slicer/bin/PythonSlicer -m pip install --no-cache-dir --no-input \
+      trimesh /tmp/wheels/*.whl \
+ && rm -rf /tmp/wheels \
+ && /opt/slicer/bin/PythonSlicer -c "\
+import numpy as np, trimesh, open3d as o3d; \
+m = o3d.geometry.TriangleMesh.create_sphere(radius=1.0); m.compute_vertex_normals(); \
+p = o3d.geometry.PointCloud(o3d.utility.Vector3dVector(np.asarray(m.vertices))); \
+print('trimesh', trimesh.__version__, '| open3d', o3d.__version__, '|', m, '|', p)"
 
 # --- launcher ---------------------------------------------------------------------------------
 # Researchers must not be expected to know about vglrun, let alone its -nodl flag, so the GPU path
