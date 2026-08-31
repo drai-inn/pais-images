@@ -279,6 +279,16 @@ ARG SLICER_VERSION
 # the previous release: all 31 are pure additions and nothing Slicer already shipped was overwritten
 # or downgraded, so this widens the dependency surface without conflicting with Slicer's own
 # environment. If open3d turns out to be unwanted, dropping this stage reverts all of it.
+# ⚠️ libgomp1 IS A RUNTIME DEPENDENCY OF open3d, not a build one. open3d is compiled with
+# WITH_OPENMP=ON, so its pybind extension links libgomp.so.1. The builder stage gets that library for
+# free as a dependency of build-essential, which makes this very easy to miss: the wheel installs and
+# imports perfectly there, then fails in the runtime stage with
+#   ImportError: libgomp.so.1: cannot open shared object file
+# Verified by reproducing it in a container built from the previous release, 2026-08-31.
+RUN apt-get update \
+ && apt-get install --yes --no-install-recommends libgomp1 \
+ && rm -rf /var/lib/apt/lists/*
+
 COPY --from=open3d-builder /out/*.whl /tmp/wheels/
 RUN /opt/slicer/bin/PythonSlicer -m pip install --no-cache-dir --no-input \
       trimesh /tmp/wheels/*.whl \
