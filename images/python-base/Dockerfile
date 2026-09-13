@@ -1,4 +1,9 @@
-# pais-datasci-cpu: general Python + R research workbench base image for Coder workspaces.
+# python-base: general Python + R research workbench base image for Coder workspaces.
+#
+# Renamed from datasci-cpu 2026-09-14. The old name said "cpu" while the template offers a GPU and
+# the driver arrives by runtime injection regardless of what is baked, so it was actively wrong. The
+# GHCR package ghcr.io/drai-inn/pais-images/datasci-cpu is left published for anything still
+# pulling it; GHCR packages cannot be renamed, so this publishes a new one.
 #
 # Managers only, by design: conda (miniforge) + uv are baked so researchers build their own
 # environments; no ML/data-science libraries are preinstalled. Editors (JupyterLab, code-server,

@@ -6,17 +6,21 @@ Container images for PAIS Coder workspaces, built by CI and published to GitHub 
 
 | Image | Tag | Purpose |
 | --- | --- | --- |
-| `ghcr.io/drai-inn/pais-images/datasci-cpu` | `latest`, `sha-<git>`, `datasci-cpu-v*` | General Python research / data-science workbench base. Ships conda (miniforge) + uv only; researchers build their own environments. Used by the `pais-datasci-cpu` Coder template. |
+| `ghcr.io/drai-inn/pais-images/python-base` | `latest`, `sha-<git>`, `python-base-v*` | General Python research / data-science workbench base. Ships conda (miniforge) + uv only; researchers build their own environments. Used by the `python-base` Coder template. |
+
+Renamed from `datasci-cpu` on 2026-09-14: the old name claimed CPU-only while the template offers a
+GPU and the driver is injected at runtime regardless of what is baked. GHCR packages cannot be
+renamed, so `datasci-cpu` remains published for anything still pulling it.
 
 ## Build & publish
 
 CI (`.github/workflows/build.yml`) builds on push to `main` (when the image or workflow changes)
-and on `datasci-cpu-v*` tags, pushing to GHCR. Packages are **public**, so the cluster pulls with
+and on `python-base-v*` tags, pushing to GHCR. Packages are **public**, so the cluster pulls with
 no image pull secret.
 
 To rebuild manually: run the `build` workflow via *Actions → build → Run workflow*.
 
-## datasci-cpu
+## python-base
 
 `FROM codercom/enterprise-base:ubuntu` (the base `pais-cpu` uses), plus:
 
@@ -32,5 +36,6 @@ To rebuild manually: run the `build` workflow via *Actions → build → Run wor
   `alias ls='ls --color=auto'`.
 - **Timezone** `Pacific/Auckland` (`TZ` plus `/etc/localtime`); the base image is UTC.
 
-Not included by design: ML/data-science libraries (build your own env) and CUDA/GPU support (a
-future `datasci-gpu` image).
+Not included by design: ML/data-science libraries and a CUDA toolkit — researchers build their own
+env with conda/uv. The driver and `nvidia-smi` are injected by the container runtime when the
+workspace requests a GPU, so no separate GPU image is needed.

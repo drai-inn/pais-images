@@ -7,7 +7,7 @@ on:
       - "images/**"
       - ".github/workflows/build.yml"
     tags:
-      - "datasci-cpu-v*"
+      - "python-base-v*"
       - "slicer-desktop-v*"
   workflow_dispatch:
 
@@ -27,7 +27,7 @@ jobs:
   changes:
     runs-on: ubuntu-latest
     outputs:
-      datasci-cpu: ${{ steps.filter.outputs.datasci-cpu }}
+      python-base: ${{ steps.filter.outputs.python-base }}
       slicer-desktop: ${{ steps.filter.outputs.slicer-desktop }}
     steps:
       - uses: actions/checkout@v7
@@ -36,14 +36,14 @@ jobs:
         uses: dorny/paths-filter@v3
         with:
           filters: |
-            datasci-cpu:
-              - 'images/datasci-cpu/**'
+            python-base:
+              - 'images/python-base/**'
             slicer-desktop:
               - 'images/slicer-desktop/**'
 
-  datasci-cpu:
+  python-base:
     needs: changes
-    if: needs.changes.outputs.datasci-cpu == 'true' || startsWith(github.ref, 'refs/tags/')
+    if: needs.changes.outputs.python-base == 'true' || startsWith(github.ref, 'refs/tags/')
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
@@ -59,7 +59,7 @@ jobs:
       - id: meta
         uses: docker/metadata-action@v6
         with:
-          images: ghcr.io/drai-inn/pais-images/datasci-cpu
+          images: ghcr.io/drai-inn/pais-images/python-base
           tags: |
             type=raw,value=latest,enable={{is_default_branch}}
             type=sha
@@ -67,7 +67,7 @@ jobs:
 
       - uses: docker/build-push-action@v7
         with:
-          context: images/datasci-cpu
+          context: images/python-base
           push: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
