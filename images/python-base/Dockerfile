@@ -27,40 +27,152 @@ RUN ln -sf "/usr/share/zoneinfo/${TZ}" /etc/localtime \
 
 # --- system tools -----------------------------------------------------------------------------
 # The base already ships build-essential, gcc/g++, git, curl, wget, jq, less, htop, rsync, unzip,
-# vim and openssh-client. Added here, in rough order of why:
+# vim, man and openssh-client. This is the interactive environment researchers land in and there is
+# NO sudo (restricted PSA drops ALL capabilities and sets no_new_privs), so anything absent here
+# cannot be added by the user later. The set below was reconciled against NeSI's OOD base image
+# (nesi/nesi-ood-base ansible/roles/nesi.compute/defaults/main.yml) on 2026-09-26, keeping what
+# suits a container workbench and dropping what only makes sense on a bare-metal HPC node.
+#
+# Session and shell:
 #   tmux            the Coder web terminal drops its session on reload, killing long conda solves,
-#                   uv syncs and model fits; tmux lets researchers detach instead
+#   screen          uv syncs and model fits; these let researchers detach instead
 #   bash-completion the completion loader itself (see the shell defaults section below)
-#   git-lfs         datasets and model weights clone as pointer files without it
-#   gfortran        conda-forge ships wheels, but `uv pip install` falls back to compiling from
-#   pkg-config      source, and scientific packages need a Fortran compiler plus these to build
+#   zsh fish        the login shell stays /bin/bash: it is hardcoded in the template's nss_wrapper
+#   tcsh ksh        passwd entry and there is no chsh without root. These are for `exec zsh` and
+#                   for scripts with a non-bash shebang, NOT a way to change your default shell.
+#
+# Editors:
+#   nano            vim is the base image's only editor and owns the `editor` alternative, so an
+#                   unset EDITOR drops researchers into vim at their first `git commit`
+#
+# Debugging and profiling:
+#   gdb             ptrace WORKS here despite the dropped capabilities: dropping ALL does not
+#   strace          remove ptrace against your own descendants, and ptrace_scope is 1, which
+#   ltrace          permits exactly the launch-then-attach pattern these use. Verified in a live
+#                   workspace 2026-09-26 (PTRACE_TRACEME and PTRACE_ATTACH to a child both OK).
+#
+#                   `perf` is DELIBERATELY ABSENT and must not be added back: perf_event_open
+#                   fails EPERM under the RuntimeDefault seccomp profile and perf_event_paranoid
+#                   is 4, so linux-tools would ship ~20 MB that can only print a permissions
+#                   error. NeSI carry perf because they are on bare metal; we cannot.
+#   lsof            what is holding that file / port
+#   psmisc          pstree, killall, fuser
+#
+# Monitoring (a workspace can hold a whole GPU and up to 256 GiB, and the cgroup limit is the
+# only thing standing between a researcher and a failed build, so this is not idle curiosity):
+#   nvtop           the GPU equivalent of htop. 0.1 MB, and there was no GPU monitor at all
+#   btop            nicer htop, and the one most people now expect
+#   sysstat         iostat/pidstat/mpstat. Home AND scratch are both NFS on VAST, so "is it me or
+#                   is it the filesystem" is otherwise unanswerable from inside the pod
+#   numactl         the H200 nodes are dual-socket; pinning matters for memory-bound work
+#   hwloc           lstopo. NB it reports the NODE topology, not the cgroup's slice of it
+#   pciutils        lspci, to see which GPU was actually injected
+#   time            /usr/bin/time -v gives peak RSS, which is how you pick between the 64, 128 and
+#                   256 GiB options. Bash's `time` builtin shadows it: use `\time -v` or the path
+#
+# Building from source (conda-forge ships wheels, but `uv pip install` falls back to compiling
+# and scientific packages still expect a full autotools chain):
+#   gfortran        a Fortran compiler plus these are the usual hard requirements
+#   pkg-config
 #   cmake
+#   autoconf automake m4
+#   libtool         plus libtool-bin: the `libtool` package ships libtoolize and the m4 macros but
+#   libtool-bin     NOT /usr/bin/libtool, which is the one a person types
+#   bison flex      parser generators, pulled in by more build systems than you would expect
+#   swig            C/C++ bindings
+#   patchelf        repairing RPATHs in prebuilt wheels
+#   universal-ctags provides `ctags`
+#
+# Data movement and transfer:
+#   git-lfs         datasets and model weights clone as pointer files without it
+#   rclone          the general answer for moving research data to and from object storage
+#   aria2 lftp      resumable and parallel fetches of large datasets over http/ftp
+#   netcat-openbsd  provides `nc`, for checking whether a port is actually reachable
+#
+# Storage and compression:
 #   ncdu            the home PVC is quota-bound and conda envs / uv caches fill it; researchers
 #                   need to see what is eating the volume
+#   pigz            parallel gzip; a workspace has up to 16 cores and tar.gz is still the default
+#   p7zip-full      provides `7z`, for archives that turn up from collaborators
+#   zip
+#
+# Documents, plotting and text:
 #   pandoc          nbconvert to anything but HTML requires it. No LaTeX: texlive is far too large
 #                   for a base image, so PDF export is not covered
+#   graphviz        provides `dot`, which pydot, sklearn tree plots and torchviz all shell out to
+#   imagemagick     quick image conversion and inspection without writing Python
+#   datamash        quick summary statistics over a column without writing Python
+#   dos2unix        files arrive from Windows collaborators
+#   bc              arithmetic in shell scripts
+#
+#                   gnuplot is DELIBERATELY ABSENT: 164 packages and ~100 MB, because it drags in
+#                   the X11 and font stack. Anyone plotting here has matplotlib.
+#
+# Search and file wrangling:
 #   ripgrep         search and file-wrangling basics
 #   fd-find         installs as `fdfind` on Debian/Ubuntu (name clash with fdclone), so it is
 #                   symlinked to the `fd` everyone actually types
+#   file            identify what a file actually is
+#   parallel        GNU parallel, for embarrassingly parallel work without writing a job script
 #   tree
-#   zip
 #
 # zstd is deliberately absent: miniforge ships one at /opt/conda/bin/zstd, which precedes /usr/bin
 # on PATH, so the apt package would never be the one that runs.
 RUN apt-get update \
  && apt-get install --yes --no-install-recommends \
+      aria2 \
+      autoconf \
+      automake \
       bash-completion \
+      bc \
+      bison \
+      btop \
       cmake \
+      datamash \
+      dos2unix \
       fd-find \
+      file \
+      fish \
+      flex \
+      gdb \
       gfortran \
       git-lfs \
+      graphviz \
+      hwloc \
+      imagemagick \
+      ksh \
+      lftp \
+      libtool \
+      libtool-bin \
+      lsof \
+      ltrace \
+      m4 \
+      nano \
       ncdu \
+      netcat-openbsd \
+      numactl \
+      nvtop \
+      p7zip-full \
       pandoc \
+      parallel \
+      patchelf \
+      pciutils \
+      pigz \
       pkg-config \
+      psmisc \
+      rclone \
       ripgrep \
+      screen \
+      strace \
+      swig \
+      sysstat \
+      tcsh \
+      time \
       tmux \
       tree \
+      universal-ctags \
       zip \
+      zsh \
  && rm -rf /var/lib/apt/lists/* \
  && ln -s "$(command -v fdfind)" /usr/local/bin/fd
 
