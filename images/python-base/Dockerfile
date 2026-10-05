@@ -233,6 +233,50 @@ RUN UV_TOOL_DIR=/opt/uv/tools \
     uv tool install jupyterlab \
  && test -x /usr/local/bin/jupyter-lab
 
+# --- Node.js ----------------------------------------------------------------------------------
+# For the pi coding agent (Node >= 22.19) and for researchers: npx-run MCP servers, JS tooling,
+# JupyterLab extension builds. Copied from the official image, like uv, rather than apt: Ubuntu's
+# npm package drags in hundreds of node-* packages. 24 is the active LTS line. The official
+# linux-x64 build targets glibc 2.28, so it runs unchanged on 26.04.
+COPY --from=node:24-slim /usr/local/bin/node /usr/local/bin/
+COPY --from=node:24-slim /usr/local/lib/node_modules/npm /usr/local/lib/node_modules/npm
+RUN ln -s ../lib/node_modules/npm/bin/npm-cli.js /usr/local/bin/npm \
+ && ln -s ../lib/node_modules/npm/bin/npx-cli.js /usr/local/bin/npx \
+ && node --version && npm --version
+
+# `npm install -g` as the workspace uid would otherwise fail EACCES against root-owned /usr/local.
+# The global npmrc (read from <node prefix>/etc/npmrc) points user installs at ~/.local, whose bin
+# dir is already on PATH below and which persists on the home PVC. Image-time installs as root pass
+# --prefix /usr/local explicitly.
+RUN mkdir -p /usr/local/etc \
+ && echo 'prefix=${HOME}/.local' > /usr/local/etc/npmrc
+
+# --- opencode (coding agent) -----------------------------------------------------------------
+# The upstream release binary (self-contained, bundles its provider SDKs) into /usr/local/bin. Not
+# the opencode.ai/install script: that installs to ~/.opencode/bin, which the home mount masks.
+# The plain x64 build needs AVX2, which every PAIS node has; the -baseline build is for CPUs without.
+#
+# PINNED because a rebuild should not silently change the agent researchers are using. Root-owned,
+# so its self-update cannot replace it: patch releases fail silently and minor/major ones show an
+# "update available" notice. OPENCODE_DISABLE_AUTOUPDATE is deliberately NOT set, because as a
+# process-wide env var it would also stop a copy a researcher installed in their own home from
+# updating itself. To move the version, bump this ARG and release the image.
+ARG OPENCODE_VERSION=1.18.34
+RUN curl -fsSL "https://github.com/anomalyco/opencode/releases/download/v${OPENCODE_VERSION}/opencode-linux-x64.tar.gz" \
+      | tar -xz --no-same-owner -C /usr/local/bin opencode \
+ && opencode --version
+
+# The PAIS provider, layered via OPENCODE_CONFIG so nothing is written to the home. opencode MERGES
+# its config layers (global ~/.config/opencode < OPENCODE_CONFIG < project opencode.json), so a
+# researcher's own config keeps working alongside this. The layer sits ABOVE their global config,
+# so it defines only the `pais` provider and never `model` or other preferences, which would
+# override theirs. Not /etc/opencode: that is opencode's managed-settings dir, which no user layer
+# can override. Every value is an {env:...} reference to what the template injects (LLM_API_BASE,
+# LLM_MODEL) or the researcher's Coder user secret (OPENAI_API_KEY), so a gateway change is a
+# template change, not an image release.
+COPY opencode.json /etc/pais/opencode.json
+ENV OPENCODE_CONFIG=/etc/pais/opencode.json
+
 # uv's default tool bin dir at runtime. Deliberately not created here: the home PVC mounts over
 # /home/coder and masks anything the image writes there, so the entry resolves only once uv makes
 # it. A non-existent PATH entry is harmless meanwhile.
