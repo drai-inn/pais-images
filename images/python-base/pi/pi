@@ -1,0 +1,8 @@
+#!/bin/sh
+# pi with the PAIS provider extension loaded. Package and config subcommands take the subcommand as
+# their first argument and reject unknown options, so they run without it.
+real=/usr/local/lib/node_modules/@earendil-works/pi-coding-agent/dist/bundle/cli.js
+case "$1" in
+  install | uninstall | remove | update | list | config | mcp) exec node "$real" "$@" ;;
+esac
+exec node "$real" -e /opt/pais/pi/pais.ts "$@"

@@ -277,6 +277,28 @@ RUN curl -fsSL "https://github.com/anomalyco/opencode/releases/download/v${OPENC
 COPY opencode.json /etc/pais/opencode.json
 ENV OPENCODE_CONFIG=/etc/pais/opencode.json
 
+# --- pi (coding agent) ------------------------------------------------------------------------
+# From npm into /usr/local, PINNED for the same reason as opencode. fd and rg, which pi otherwise
+# downloads into ~/.pi on first use, are in the apt list above.
+#
+# pi has no system-wide config layer: models.json, settings.json, auth.json and sessions all live
+# in ~/.pi/agent. The PAIS provider is therefore an extension (pi/pais.ts) that the /usr/local/bin/pi
+# wrapper loads with `-e`, which adds to the researcher's own extensions rather than replacing them,
+# and nothing is written to the home. A pi the researcher installs themselves (npm -g lands in
+# ~/.local, ahead on PATH) runs without the wrapper and so without the provider.
+#
+# PI_SKIP_VERSION_CHECK hides the "update available" notice for this root-owned copy. Not
+# PI_OFFLINE: that also stops pi installing and updating the researcher's own pi packages.
+ARG PI_VERSION=1.0.4
+RUN npm install -g --prefix /usr/local "@earendil-works/pi-coding-agent@${PI_VERSION}" \
+ && npm cache clean --force \
+ && rm /usr/local/bin/pi
+COPY pi/pais.ts /opt/pais/pi/pais.ts
+COPY --chmod=0755 pi/pi /usr/local/bin/pi
+RUN pi --version
+ENV PI_SKIP_VERSION_CHECK=1 \
+    PI_TELEMETRY=0
+
 # --- buzz -------------------------------------------------------------------------------------
 # `buzz` (CLI) and `buzz-acp` (ACP harness bridging Buzz events to an agent such as
 # `opencode acp`). block/buzz publishes no standalone CLI release; both binaries ship inside the
