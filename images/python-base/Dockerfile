@@ -277,6 +277,20 @@ RUN curl -fsSL "https://github.com/anomalyco/opencode/releases/download/v${OPENC
 COPY opencode.json /etc/pais/opencode.json
 ENV OPENCODE_CONFIG=/etc/pais/opencode.json
 
+# --- buzz -------------------------------------------------------------------------------------
+# `buzz` (CLI) and `buzz-acp` (ACP harness bridging Buzz events to an agent such as
+# `opencode acp`). block/buzz publishes no standalone CLI release; both binaries ship inside the
+# Linux desktop .deb, so they are extracted from it rather than built from source. They link
+# only against glibc (<= 2.39). Installed unconfigured: relay URL, keys and allowlists are the
+# researcher's own (BUZZ_* env vars, e.g. via Coder user secrets).
+ARG BUZZ_VERSION=0.5.26
+RUN curl -fsSL -o /tmp/buzz.deb \
+      "https://github.com/block/buzz/releases/download/desktop-v${BUZZ_VERSION}/Buzz_${BUZZ_VERSION}_amd64.deb" \
+ && dpkg-deb -x /tmp/buzz.deb /tmp/buzz \
+ && install -m 0755 /tmp/buzz/usr/bin/buzz /tmp/buzz/usr/bin/buzz-acp /usr/local/bin/ \
+ && rm -rf /tmp/buzz.deb /tmp/buzz \
+ && buzz --help >/dev/null && buzz-acp --help >/dev/null
+
 # uv's default tool bin dir at runtime. Deliberately not created here: the home PVC mounts over
 # /home/coder and masks anything the image writes there, so the entry resolves only once uv makes
 # it. A non-existent PATH entry is harmless meanwhile.
