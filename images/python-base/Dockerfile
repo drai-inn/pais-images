@@ -95,6 +95,7 @@ RUN ln -sf "/usr/share/zoneinfo/${TZ}" /etc/localtime \
 #   pigz            parallel gzip; a workspace has up to 16 cores and tar.gz is still the default
 #   p7zip-full      provides `7z`, for archives that turn up from collaborators
 #   zip
+#   zstd            the base ships none, and /opt/conda/bin (which has one) is not on PATH
 #
 # Documents, plotting and text:
 #   pandoc          nbconvert to anything but HTML requires it. No LaTeX: texlive is far too large
@@ -115,9 +116,6 @@ RUN ln -sf "/usr/share/zoneinfo/${TZ}" /etc/localtime \
 #   file            identify what a file actually is
 #   parallel        GNU parallel, for embarrassingly parallel work without writing a job script
 #   tree
-#
-# zstd is deliberately absent: miniforge ships one at /opt/conda/bin/zstd, which precedes /usr/bin
-# on PATH, so the apt package would never be the one that runs.
 RUN apt-get update \
  && apt-get install --yes --no-install-recommends \
       aria2 \
@@ -173,6 +171,7 @@ RUN apt-get update \
       universal-ctags \
       zip \
       zsh \
+      zstd \
  && rm -rf /var/lib/apt/lists/* \
  && ln -s "$(command -v fdfind)" /usr/local/bin/fd
 
@@ -188,8 +187,12 @@ RUN echo ". /usr/share/bash-completion/bash_completion" >> /etc/bash.bashrc \
 # Installed to /opt/conda, owned by root. Because the runtime user (coder, UID 1000) does not own
 # /opt/conda, conda transparently creates new environments under ~/.conda/envs — i.e. on the home
 # PVC, so they persist. The condarc below makes that explicit and points package/env dirs at $HOME.
+#
+# Only condabin (`conda`, `mamba`) is on PATH, not /opt/conda/bin. The base env's python and pip
+# would otherwise shadow the uv default interpreter below, and `pip install` into the root-owned
+# base falls back to --user and litters ~/.local/lib. `conda activate` still puts an env's bin first.
 ENV CONDA_DIR=/opt/conda
-ENV PATH=${CONDA_DIR}/bin:${PATH}
+ENV PATH=${CONDA_DIR}/condabin:${PATH}
 RUN curl -fsSL -o /tmp/miniforge.sh \
       "https://github.com/conda-forge/miniforge/releases/latest/download/Miniforge3-Linux-x86_64.sh" \
  && bash /tmp/miniforge.sh -b -p "${CONDA_DIR}" \
@@ -216,6 +219,19 @@ COPY --from=ghcr.io/astral-sh/uv:latest /uv /uvx /usr/local/bin/
 # first use of `uv`/`uvx` rather than in every shell startup.
 RUN uv generate-shell-completion bash > /usr/share/bash-completion/completions/uv \
  && uvx --generate-shell-completion bash > /usr/share/bash-completion/completions/uvx
+
+# The default `python`/`python3`: a uv-managed CPython linked into /usr/local/bin, ahead of Ubuntu's
+# /usr/bin/python3. A researcher's own `uv python install --default` lands in ~/.local/bin, which
+# precedes it. The links target uv's per-minor directory, so venvs built on it survive patch
+# upgrades but not a minor change: the minor is PINNED so a rebuild cannot break them. To move it,
+# bump this ARG, release, and tell researchers to recreate venvs made from the default python.
+# --default is still a uv preview feature, hence the explicit opt-in. The UV_* scoping is explained
+# at the JupyterLab install below.
+ARG PYTHON_VERSION=3.14
+RUN UV_PYTHON_INSTALL_DIR=/opt/uv/python \
+    UV_PYTHON_BIN_DIR=/usr/local/bin \
+    uv python install --default --preview-features python-install-default "${PYTHON_VERSION}" \
+ && /usr/local/bin/python --version
 
 # JupyterLab baked via uv as an isolated tool, on PATH as /usr/local/bin/jupyter-lab. The Coder
 # jupyterlab registry module is not used: in path mode it hardcodes its healthcheck at the root

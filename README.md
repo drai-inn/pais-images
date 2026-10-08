@@ -25,8 +25,11 @@ To rebuild manually: run the `build` workflow via *Actions → build → Run wor
 `FROM codercom/enterprise-base:ubuntu` (the base `pais-cpu` uses), plus:
 
 - **miniforge** (conda) at `/opt/conda`. New envs land in `~/.conda/envs`, on the workspace home
-  PVC, so they persist across restarts.
+  PVC, so they persist across restarts. Only `conda` and `mamba` are on PATH (`/opt/conda/condabin`);
+  the base env's `python`/`pip` are not.
 - **uv** at `/usr/local/bin`. Cache defaults to `~/.cache/uv` on the home PVC.
+- **Default Python**: a uv-managed CPython (minor pinned by `PYTHON_VERSION`) as `python`/`python3`
+  in `/usr/local/bin`, ahead of Ubuntu's `/usr/bin/python3`.
 - **CLI tools**: `tmux` (so long jobs survive a web-terminal reload), `git-lfs`, `gfortran` +
   `pkg-config` + `cmake` (source builds of scientific packages), `ncdu` (find what is filling the
   home PVC), `pandoc` (nbconvert to non-HTML formats; no LaTeX, so no PDF), `ripgrep`, `fd`,
