@@ -1,21 +1,21 @@
 # python-base: general Python + R research workbench base image for Coder workspaces.
 #
-# Renamed from datasci-cpu 2026-09-14. The old name said "cpu" while the template offers a GPU and
-# the driver arrives by runtime injection regardless of what is baked, so it was actively wrong. The
-# GHCR package ghcr.io/drai-inn/pais-images/datasci-cpu is left published for anything still
-# pulling it; GHCR packages cannot be renamed, so this publishes a new one.
-#
 # Managers only, by design: conda (miniforge) + uv are baked so researchers build their own
 # environments; no ML/data-science libraries are preinstalled. Editors (JupyterLab, code-server,
 # VS Code Web) are added at workspace runtime by the Coder registry modules in the template.
 #
-# Built on codercom/enterprise-base:ubuntu (the same base pais-cpu uses): provides the UID-1000
-# `coder` user, HOME=/home/coder, git/curl/pipx and passwordless sudo. The workspace mounts the
-# persistent home PVC at /home/coder, so anything conda/uv writes under $HOME (envs, caches)
-# survives workspace restarts with no extra configuration.
+# Built on codercom/enterprise-base:ubuntu for git/curl/pipx. The template runs the workspace as the
+# owner's real uid, mounts their persistent home at /home/<posix account name> and sets HOME and
+# PATH to match, so anything conda/uv writes under $HOME (envs, caches) survives workspace restarts.
+# Nothing here may assume the home's path: refer to it as ~ or $HOME, resolved at runtime.
 FROM codercom/enterprise-base:ubuntu
 
 USER root
+
+# The base's UID-1000 `coder` user, its /home/coder and its NOPASSWD sudo are never used: the pod
+# runs as the owner's uid without privilege escalation.
+RUN userdel -r coder \
+ && rm /etc/sudoers.d/nopasswd
 
 # --- timezone ---------------------------------------------------------------------------------
 # The base image is UTC. Researchers are in NZ, so make wall-clock times in logs, notebook output
@@ -177,14 +177,14 @@ RUN apt-get update \
 
 # --- interactive shell defaults ---------------------------------------------------------------
 # Ubuntu puts the bash-completion hook and `alias ls --color=auto` in ~/.bashrc, which the image
-# seeds from /etc/skel. The home PVC mounts over /home/coder and masks it, so in a workspace
-# neither ever runs. Set them system-wide in /etc/bash.bashrc instead: interactive shells read it
-# directly and login shells get it via /etc/profile.
+# seeds from /etc/skel, and a researcher's home may hold a .bashrc without them (or none at all).
+# Set them system-wide in /etc/bash.bashrc instead: interactive shells read it directly and login
+# shells get it via /etc/profile.
 RUN echo ". /usr/share/bash-completion/bash_completion" >> /etc/bash.bashrc \
  && echo "alias ls='ls --color=auto'" >> /etc/bash.bashrc
 
 # --- miniforge (conda) at a system path -------------------------------------------------------
-# Installed to /opt/conda, owned by root. Because the runtime user (coder, UID 1000) does not own
+# Installed to /opt/conda, owned by root. Because the runtime user (the owner's uid) does not own
 # /opt/conda, conda transparently creates new environments under ~/.conda/envs — i.e. on the home
 # PVC, so they persist. The condarc below makes that explicit and points package/env dirs at $HOME.
 #
@@ -222,24 +222,31 @@ RUN uv generate-shell-completion bash > /usr/share/bash-completion/completions/u
 
 # The default `python`/`python3`: a uv-managed CPython linked into /usr/local/bin, ahead of Ubuntu's
 # /usr/bin/python3. A researcher's own `uv python install --default` lands in ~/.local/bin, which
-# precedes it. The links target uv's per-minor directory, so venvs built on it survive patch
-# upgrades but not a minor change: the minor is PINNED so a rebuild cannot break them. To move it,
-# bump this ARG, release, and tell researchers to recreate venvs made from the default python.
-# --default is still a uv preview feature, hence the explicit opt-in. The UV_* scoping is explained
-# at the JupyterLab install below.
+# the template puts first on PATH. The links target uv's per-minor directory, so venvs built on it
+# survive patch upgrades but not a minor change: the minor is PINNED so a rebuild cannot break them.
+# To move it, bump this ARG, release, and tell researchers to recreate venvs made from the default
+# python. --default is still a uv preview feature, hence the explicit opt-in. The UV_* scoping is
+# explained at the JupyterLab install below.
+#
+# uv links only the interpreters, so its `pip` is linked by hand. Otherwise bare `pip` is Ubuntu's
+# /usr/bin/pip, which runs under Ubuntu's own python3 and disagrees with `python -m pip`. Outside a
+# venv both refuse to install (PEP 668: uv marks its pythons externally managed), but this way the
+# error points at uv rather than apt.
 ARG PYTHON_VERSION=3.14
 RUN UV_PYTHON_INSTALL_DIR=/opt/uv/python \
     UV_PYTHON_BIN_DIR=/usr/local/bin \
     uv python install --default --preview-features python-install-default "${PYTHON_VERSION}" \
- && /usr/local/bin/python --version
+ && bin="$(dirname "$(readlink /usr/local/bin/python)")" \
+ && for p in pip pip3 "pip${PYTHON_VERSION}"; do ln -s "${bin}/${p}" "/usr/local/bin/${p}"; done \
+ && /usr/local/bin/python --version && /usr/local/bin/pip --version
 
 # JupyterLab baked via uv as an isolated tool, on PATH as /usr/local/bin/jupyter-lab. The Coder
 # jupyterlab registry module is not used: in path mode it hardcodes its healthcheck at the root
 # /api while serving under a base_url prefix, so the app is always reported unhealthy. The
 # template starts this baked JupyterLab itself with a matching healthcheck instead.
 #
-# The UV_* settings are scoped to this RUN deliberately. As ENV they persist past `USER coder` into
-# the running workspace, where uid 1000 cannot write to root-owned /opt/uv, so any uv operation
+# The UV_* settings are scoped to this RUN deliberately. As ENV they persist into the running
+# workspace, where the owner's uid cannot write to root-owned /opt/uv, so any uv operation
 # needing an interpreter download dies with
 #   error: failed to create directory `/opt/uv/python`: Permission denied (os error 13)
 # Unscoped, uv falls back to ~/.local/share/uv and ~/.local/bin, both on the home PVC.
@@ -262,15 +269,16 @@ RUN ln -s ../lib/node_modules/npm/bin/npm-cli.js /usr/local/bin/npm \
 
 # `npm install -g` as the workspace uid would otherwise fail EACCES against root-owned /usr/local.
 # The global npmrc (read from <node prefix>/etc/npmrc) points user installs at ~/.local, whose bin
-# dir is already on PATH below and which persists on the home PVC. Image-time installs as root pass
+# dir the template puts on PATH and which persists on the home PVC. Image-time installs as root pass
 # --prefix /usr/local explicitly.
 RUN mkdir -p /usr/local/etc \
  && echo 'prefix=${HOME}/.local' > /usr/local/etc/npmrc
 
 # --- opencode (coding agent) -----------------------------------------------------------------
 # The upstream release binary (self-contained, bundles its provider SDKs) into /usr/local/bin. Not
-# the opencode.ai/install script: that installs to ~/.opencode/bin, which the home mount masks.
-# The plain x64 build needs AVX2, which every PAIS node has; the -baseline build is for CPUs without.
+# the opencode.ai/install script: that installs to ~/.opencode/bin, and the workspace home is the
+# researcher's, not the image's. The plain x64 build needs AVX2, which every PAIS node has; the
+# -baseline build is for CPUs without.
 #
 # PINNED because a rebuild should not silently change the agent researchers are using. Root-owned,
 # so its self-update cannot replace it: patch releases fail silently and minor/major ones show an
@@ -329,9 +337,4 @@ RUN curl -fsSL -o /tmp/buzz.deb \
  && rm -rf /tmp/buzz.deb /tmp/buzz \
  && buzz --help >/dev/null && buzz-acp --help >/dev/null
 
-# uv's default tool bin dir at runtime. Deliberately not created here: the home PVC mounts over
-# /home/coder and masks anything the image writes there, so the entry resolves only once uv makes
-# it. A non-existent PATH entry is harmless meanwhile.
-ENV PATH=/home/coder/.local/bin:${PATH}
-
-USER coder
+USER nobody
