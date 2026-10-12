@@ -295,7 +295,15 @@ RUN curl -fsSL "https://github.com/anomalyco/opencode/releases/download/v${OPENC
 # researcher's own config keeps working alongside this. The layer sits ABOVE their global config,
 # so it defines only the `pais` provider and never `model` or other preferences, which would
 # override theirs. Not /etc/opencode: that is opencode's managed-settings dir, which no user layer
-# can override. Every value is an {env:...} reference to what the template injects (LLM_API_BASE,
+# can override.
+#
+# It also disables two built-in providers. `openai` turns itself on whenever OPENAI_API_KEY is set,
+# and here that variable holds the PAIS key, so every model it lists would fail against
+# api.openai.com. `opencode` is opencode's hosted Zen service (free models such as Big Pickle,
+# needing no key), which would send prompts and code outside PAIS. With both gone, `pais` is the
+# only connected provider and becomes the default without setting `model`. Config arrays REPLACE
+# rather than concatenate, so a researcher re-enables these only from a project opencode.json or
+# their own OPENCODE_CONFIG, not from ~/.config/opencode. Every value is an {env:...} reference to what the template injects (LLM_API_BASE,
 # LLM_MODEL) or the researcher's Coder user secret (OPENAI_API_KEY), so a gateway change is a
 # template change, not an image release.
 COPY opencode.json /etc/pais/opencode.json
