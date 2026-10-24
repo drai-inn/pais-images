@@ -7,6 +7,7 @@ Container images for PAIS Coder workspaces, built by CI and published to GitHub 
 | Image | Tag | Purpose |
 | --- | --- | --- |
 | `ghcr.io/drai-inn/pais-images/python-base` | `latest`, `sha-<git>`, `python-base-v*` | General Python research / data-science workbench base. Ships conda (miniforge) + uv only; researchers build their own environments. Used by the `python-base` Coder template. |
+| `ghcr.io/drai-inn/pais-images/runai-mcp-server` | `<Run:ai version>` (e.g. `3.0.20`), `sha-<git>`, `runai-mcp-server-v*` | NVIDIA Run:ai's MCP server, built from the open-source `dsx-ai-factory/run-ai` at the release tag in `images/runai-mcp-server/VERSION`. Runs on ai-gpu-test behind agentgateway (the MCP hub). |
 
 Renamed from `datasci-cpu` on 2026-09-14: the old name claimed CPU-only while the template offers a
 GPU and the driver is injected at runtime regardless of what is baked. GHCR packages cannot be
@@ -42,3 +43,18 @@ To rebuild manually: run the `build` workflow via *Actions → build → Run wor
 Not included by design: ML/data-science libraries and a CUDA toolkit — researchers build their own
 env with conda/uv. The driver and `nvidia-smi` are injected by the container runtime when the
 workspace requests a GPU, so no separate GPU image is needed.
+
+## runai-mcp-server
+
+NVIDIA Run:ai's MCP server (`runai-mcp-server serve`): MCP tools over Run:ai's REST API, acting as the caller's own
+Run:ai token in HTTP mode. NVIDIA publishes no image of the open-source server (NGC's
+`nvcr.io/nvidia/runai/runai-mcp-server` is the commercial 2.x line, with a different tool set), so this builds it.
+
+- **Source:** `https://github.com/dsx-ai-factory/run-ai`, directory `runai-mcp-server/`, at the tag in
+  `images/runai-mcp-server/VERSION`. Keep it equal to the Run:ai control plane's version it serves.
+- **Build:** clones only `runai-mcp-server/` and the in-repo modules its `go.mod` `replace`s point to, builds with the
+  module's own `go.sum`, `linux/amd64`. The final stage is upstream's Dockerfile (scratch, CA certificates, user
+  65532).
+- **Tags:** the version (e.g. `3.0.20`) and `sha-<git>`. No `latest`: deployments pin a version by digest.
+- **New version:** change `VERSION` and push to `main`.
+- **Deployed by:** `drai-inn/ai-gpu-deployment`, `clusters/ai-gpu-test/runai-mcp/`.
