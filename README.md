@@ -8,6 +8,7 @@ Container images for PAIS Coder workspaces, built by CI and published to GitHub 
 | --- | --- | --- |
 | `ghcr.io/drai-inn/pais-images/python-base` | `latest`, `sha-<git>`, `python-base-v*` | General Python research / data-science workbench base. Ships conda (miniforge) + uv only; researchers build their own environments. Used by the `python-base` Coder template. |
 | `ghcr.io/drai-inn/pais-images/runai-mcp-server` | `<Run:ai version>` (e.g. `3.0.20`), `sha-<git>`, `runai-mcp-server-v*` | NVIDIA Run:ai's MCP server, built from the open-source `dsx-ai-factory/run-ai` at the release tag in `images/runai-mcp-server/VERSION`. Runs on ai-gpu-test behind agentgateway (the MCP hub). |
+| `ghcr.io/drai-inn/pais-images/nfs-server` | `<nfs-utils version>` (e.g. `2.6.4-3ubuntu5.1`), `sha-<git>`, `nfs-server-v*` | Runs the node kernel's NFS server from a privileged pod: Ubuntu's `nfs-kernel-server` at the version in `images/nfs-server/VERSION`. Serves workspace homes on ai-gpu-test. |
 
 Renamed from `datasci-cpu` on 2026-09-14: the old name claimed CPU-only while the template offers a
 GPU and the driver is injected at runtime regardless of what is baked. GHCR packages cannot be
@@ -58,3 +59,21 @@ Run:ai token in HTTP mode. NVIDIA publishes no image of the open-source server (
 - **Tags:** the version (e.g. `3.0.20`) and `sha-<git>`. No `latest`: deployments pin a version by digest.
 - **New version:** change `VERSION` and push to `main`.
 - **Deployed by:** `drai-inn/ai-gpu-deployment`, `clusters/ai-gpu-test/runai-mcp/`.
+
+## nfs-server
+
+Configures and runs the **node kernel's** NFS server (`nfsd`) from a container. The image holds only the user-space
+side: `rpc.nfsd`, `rpc.mountd`, `exportfs` and `nfsdcld`, plus `rpcbind` and `rpc.statd` for NFSv3. So the pod must be
+privileged, and the node must have the `nfsd` module (Ubuntu 24.04 nodes do).
+
+- **Why our own:** the public kernel-NFS images are unmaintained (`itsthenetwork/nfs-server-alpine` last tagged
+  2019, `erichough/nfs-server` 2020).
+- **Contents:** `ubuntu:noble-<date>` and Ubuntu's `nfs-kernel-server` / `nfs-common`, pinned to the version in
+  `images/nfs-server/VERSION`. When Ubuntu publishes a new version, the build fails until `VERSION` follows it.
+- **Run:** `nfs-server run` serves the exports in `/etc/exports.d/*.exports` (`exports(5)`), and stops the server
+  (`exportfs -ua`, `rpc.nfsd 0`) on TERM. `nfs-server check` is the probe.
+- **Settings:** environment variables, listed at the top of `entrypoint.sh`. `NFS_VERSIONS` defaults to `4.1 4.2`;
+  NFSv3 (`3`) also starts `rpcbind` and `rpc.statd`, on fixed ports.
+- **Tags:** the version and `sha-<git>`. No `latest`: deployments pin a version by digest.
+- **New version:** change `VERSION` and push to `main`.
+- **Deployed by:** `drai-inn/ai-gpu-deployment`, `clusters/ai-gpu-test/workspaces-home/`.
