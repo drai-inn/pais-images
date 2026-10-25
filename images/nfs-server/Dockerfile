@@ -14,12 +14,13 @@ ARG NFS_UTILS_VERSION
 RUN test -n "${NFS_UTILS_VERSION}" || { echo "NFS_UTILS_VERSION build arg is required" >&2; exit 1; }
 
 # util-linux (mount, mountpoint) is in the base image. nfs-kernel-server's postinst can't start services in a build.
+# /etc/exports stays, empty: exportfs won't run without it. The exports themselves go in /etc/exports.d.
 RUN apt-get update \
     && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
         "nfs-kernel-server=1:${NFS_UTILS_VERSION}" \
         "nfs-common=1:${NFS_UTILS_VERSION}" \
     && rm -rf /var/lib/apt/lists/* \
-    && rm -f /etc/exports \
+    && : > /etc/exports \
     && mkdir -p /etc/exports.d
 
 COPY entrypoint.sh /usr/local/bin/nfs-server
