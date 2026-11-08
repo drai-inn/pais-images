@@ -7,6 +7,7 @@ Container images for PAIS Coder workspaces, built by CI and published to GitHub 
 | Image | Tag | Purpose |
 | --- | --- | --- |
 | `ghcr.io/drai-inn/pais-images/python-base` | `latest`, `sha-<git>`, `python-base-v*` | General Python research / data-science workbench base. Ships conda (miniforge) + uv only; researchers build their own environments. Used by the `python-base` Coder template. |
+| `ghcr.io/drai-inn/pais-images/pais-base` | `pais-base-v<n>` (from `VERSION`), `sha-<git>` | `python-base` plus `nss_wrapper`, for Workspaces running as the person's FreeIPA uid. See below. |
 | `ghcr.io/drai-inn/pais-images/runai-mcp-server` | `<Run:ai version>` (e.g. `3.0.20`), `sha-<git>`, `runai-mcp-server-v*` | NVIDIA Run:ai's MCP server, built from the open-source `dsx-ai-factory/run-ai` at the release tag in `images/runai-mcp-server/VERSION`. Runs on ai-gpu-test behind agentgateway (the MCP hub). |
 | `ghcr.io/drai-inn/pais-images/nfs-server` | `<nfs-utils version>` (e.g. `2.6.4-3ubuntu5.1`), `sha-<git>`, `nfs-server-v*` | Runs the node kernel's NFS server from a privileged pod: Ubuntu's `nfs-kernel-server` at the version in `images/nfs-server/VERSION`. Serves workspace homes on ai-gpu-test. |
 
@@ -44,6 +45,18 @@ To rebuild manually: run the `build` workflow via *Actions → build → Run wor
 Not included by design: ML/data-science libraries and a CUDA toolkit — researchers build their own
 env with conda/uv. The driver and `nvidia-smi` are injected by the container runtime when the
 workspace requests a GPU, so no separate GPU image is needed.
+
+## pais-base
+
+`python-base` (at a pinned digest) plus `libnss-wrapper`, for Workspaces that run as the person's FreeIPA uid. The
+uid has no entry in the image's `/etc/passwd`; the workspace bootstrap writes a passwd and group copy in `/tmp` with the
+owner and `pais-users` added, and preloads the library. Only those names resolve, so project groups stay numeric until
+pod-facing SSSD replaces this. Used by the `pais-base` Workspaces template in `drai-inn/ai-gpu-deployment`.
+
+- **Tags:** the contents of `images/pais-base/VERSION` (e.g. `pais-base-v0`) and `sha-<git>`. No `latest`: the template
+  pins a digest.
+- **New version:** change `images/pais-base/` and bump `VERSION` in the same commit, or the build overwrites the
+  current version tag. Then move the digest in the template.
 
 ## runai-mcp-server
 

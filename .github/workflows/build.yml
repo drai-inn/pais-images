@@ -30,6 +30,7 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       python-base: ${{ steps.filter.outputs.python-base }}
+      pais-base: ${{ steps.filter.outputs.pais-base }}
       slicer-desktop: ${{ steps.filter.outputs.slicer-desktop }}
       runai-mcp-server: ${{ steps.filter.outputs.runai-mcp-server }}
       nfs-server: ${{ steps.filter.outputs.nfs-server }}
@@ -42,6 +43,8 @@ jobs:
           filters: |
             python-base:
               - 'images/python-base/**'
+            pais-base:
+              - 'images/pais-base/**'
             slicer-desktop:
               - 'images/slicer-desktop/**'
             runai-mcp-server:
@@ -76,6 +79,42 @@ jobs:
       - uses: docker/build-push-action@v7
         with:
           context: images/python-base
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+  pais-base:
+    needs: changes
+    # Only when its own folder changes, never on a git tag: a tag push must not overwrite this image's version tag.
+    if: needs.changes.outputs.pais-base == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - id: version
+        run: echo "version=$(tr -d '[:space:]' < images/pais-base/VERSION)" >> "$GITHUB_OUTPUT"
+
+      - uses: docker/setup-buildx-action@v4
+
+      - uses: docker/login-action@v4
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - id: meta
+        uses: docker/metadata-action@v6
+        with:
+          images: ghcr.io/drai-inn/pais-images/pais-base
+          tags: |
+            type=raw,value=${{ steps.version.outputs.version }}
+            type=sha
+
+      - uses: docker/build-push-action@v7
+        with:
+          context: images/pais-base
           push: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
