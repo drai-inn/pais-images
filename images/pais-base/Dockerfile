@@ -50,6 +50,9 @@ ENV TZ=Pacific/Auckland \
 #   openssh-server  `sshd -i` as the person, one per connection; nothing listens by default
 #   openssh-sftp-server
 #                   sftp, and scp (which speaks SFTP since OpenSSH 9), for sshd and for Tailscale SSH
+#   tini            a minimal init for PID 1, which the start-up execs last: it reaps processes left
+#                   behind when an ssh session or a browser tool's terminal ends, which plain
+#                   `sleep` as PID 1 never does
 #
 # Session and shell:
 #   tmux            a browser terminal drops its session on reload, killing long conda solves,
@@ -211,6 +214,7 @@ RUN apt-get update \
       sysstat \
       tcsh \
       time \
+      tini \
       tmux \
       tree \
       tzdata \
