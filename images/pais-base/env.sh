@@ -45,6 +45,16 @@ fi
 [ -n "${USER:-}" ] || USER=$(id -un 2>/dev/null) && export USER
 : "${LOGNAME:=$USER}" && export LOGNAME
 
+# bash resolves \u in its prompt when it starts, before this file sets LD_PRELOAD, so a shell started
+# without nss_wrapper loaded (a Tailscale SSH session) shows "I have no name!" although `id` works.
+# Interactive bash only: \u in the prompt becomes the name in USER. A prompt set later (~/.bashrc) wins.
+case "${BASH_VERSION:-}:$-" in
+  ?*:*i*)
+    case "${PS1:-}:${USER:-}" in
+      *'\u'*:?*) PS1=$(printf '%s' "$PS1" | sed "s/\\\\u/$USER/g") ;;
+    esac ;;
+esac
+
 # opencode keeps its state in one SQLite database opened in WAL mode, and WAL cannot be shared
 # across nodes over NFS: two Workspaces using the default ~/.local/share/opencode/opencode.db fail
 # with "locking protocol". One database per Workspace, still in the home so it survives restarts.
