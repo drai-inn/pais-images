@@ -48,12 +48,27 @@ workspace requests a GPU, so no separate GPU image is needed.
 
 ## pais-base
 
-`python-base` (at a pinned digest) plus `libnss-wrapper`, for Workspaces that run as the person's FreeIPA uid. The
-uid has no entry in the image's `/etc/passwd`; the workspace bootstrap writes a passwd and group copy in `/tmp` with the
-owner and `pais-users` added, and preloads the library. Only those names resolve, so project groups stay numeric until
-pod-facing SSSD replaces this. Used by the `pais-base` Workspaces template in `drai-inn/ai-gpu-deployment`.
+The PAIS Workspace image: a standalone Python + R research workbench on `ubuntu:26.04` (pinned by digest), for
+Workspaces that run as the person's FreeIPA uid. Used by the `ubuntu-shell` Run:ai templates in
+`drai-inn/ai-gpu-deployment` (`services/ai-gpu-test/identity/ws-shell/runai-templates/`).
 
-- **Tags:** the contents of `images/pais-base/VERSION` (e.g. `pais-base-v0`) and `sha-<git>`. No `latest`: the template
+- **Python:** miniforge (conda) at `/opt/conda`, envs in `~/.conda/envs`; uv, with a uv-managed CPython as the default
+  `python`; Node.js 24.
+- **GPU monitoring:** `nvtop`, `nvitop`.
+- **Browser tools:** JupyterLab, code-server, ttyd and File Browser Quantum. Nothing starts by itself: the template's
+  start-up runs the ones it exposes.
+- **Coding agents:** opencode and pi (with the PAIS provider), Claude Code.
+- **Remote access:** `openssh-server` and `openssh-sftp-server` (for `sshd -i` as the person; no host keys in the
+  image), `websocat`, `gh`.
+- **Names:** `libnss-wrapper`. The uid has no entry in `/etc/passwd`; the start-up writes passwd and group copies in
+  `/tmp` and the template preloads the library.
+- **Per-Workspace settings:** `/etc/pais/env.sh` sets thread caps from the cgroup CPU limit, `~/.local/bin` first on
+  `PATH`, `USER`/`LOGNAME`, a per-Workspace `OPENCODE_DB` and an unlimited stack. It is sourced by interactive bash
+  (`/etc/bash.bashrc`), non-interactive bash (`BASH_ENV`) and the start-up.
+- **Locale:** `en_NZ.UTF-8`, timezone `Pacific/Auckland`.
+- **Pinning:** release downloads by version and SHA-256 (ARGs in the Dockerfile), images by digest. Apt packages are
+  not pinned.
+- **Tags:** the contents of `images/pais-base/VERSION` (e.g. `pais-base-v1`) and `sha-<git>`. No `latest`: the template
   pins a digest.
 - **New version:** change `images/pais-base/` and bump `VERSION` in the same commit, or the build overwrites the
   current version tag. Then move the digest in the template.

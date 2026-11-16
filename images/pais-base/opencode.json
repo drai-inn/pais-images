@@ -1,0 +1,20 @@
+{
+  "$schema": "https://opencode.ai/config.json",
+  "disabled_providers": [
+    "opencode",
+    "openai"
+  ],
+  "provider": {
+    "pais": {
+      "name": "PAIS",
+      "npm": "@ai-sdk/openai-compatible",
+      "options": {
+        "baseURL": "{env:LLM_API_BASE}",
+        "apiKey": "{env:OPENAI_API_KEY}"
+      },
+      "models": {
+        "{env:LLM_MODEL}": {}
+      }
+    }
+  }
+}
