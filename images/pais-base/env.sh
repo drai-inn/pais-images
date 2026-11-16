@@ -30,6 +30,18 @@ esac
 export PATH
 
 # The uid has no entry in the image's passwd; the start-up's nss_wrapper files give it a name.
+# The template sets these three for the container, but a way in that builds its own environment
+# doesn't pass them on: Tailscale SSH (PAIS Connect) starts each session with only USER, HOME, SHELL,
+# PATH, TERM/LANG/LC_* and SSH_*, so `id` showed numbers and bash "I have no name!". Set them here
+# whenever the start-up's files exist; values already set win.
+if [ -r /tmp/pais-nss/passwd ] && [ -r /tmp/pais-nss/group ]; then
+  : "${NSS_WRAPPER_PASSWD:=/tmp/pais-nss/passwd}" "${NSS_WRAPPER_GROUP:=/tmp/pais-nss/group}"
+  export NSS_WRAPPER_PASSWD NSS_WRAPPER_GROUP
+  case " ${LD_PRELOAD:-} " in
+    *libnss_wrapper.so*) ;;
+    *) LD_PRELOAD="/usr/lib/x86_64-linux-gnu/libnss_wrapper.so${LD_PRELOAD:+ $LD_PRELOAD}"; export LD_PRELOAD ;;
+  esac
+fi
 [ -n "${USER:-}" ] || USER=$(id -un 2>/dev/null) && export USER
 : "${LOGNAME:=$USER}" && export LOGNAME
 
