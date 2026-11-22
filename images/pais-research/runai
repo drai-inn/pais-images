@@ -1,0 +1,28 @@
+#!/usr/bin/env bash
+# runai -- the Run:ai CLI from the person's own home (~/.runai/bin/runai), with each person's own login.
+#
+# NVIDIA's CLI is not redistributed in this public image. Each person installs it once, from the
+# Run:ai UI, into their home (which follows them into every Workspace). This helper then runs it,
+# points a new install at this environment's control plane ($PAIS_RUNAI_URL) and, the first time,
+# starts the login.
+CLI=$HOME/.runai/bin/runai
+URL=${PAIS_RUNAI_URL:-}
+
+if [ ! -x "$CLI" ]; then
+  cat >&2 <<EOF
+The Run:ai CLI isn't installed in your home yet. Once:
+  1. Open the Run:ai UI${URL:+ ($URL)}, then  ?  ->  Researcher Command Line Interface  ->  Linux.
+  2. Copy the install command it shows and paste it into this terminal.
+  3. Run  runai  again: it sets the control plane and starts your login.
+EOF
+  exit 1
+fi
+
+# First use: point it at this environment and log in (a link to open in your own browser).
+if [ ! -f "$HOME/.runai/authentication.json" ] && [ -n "$URL" ] && [ "${1:-}" != "login" ] && [ "${1:-}" != "config" ]; then
+  echo "First use: setting the control plane to $URL and logging you in." >&2
+  "$CLI" config set --cp-url "$URL" --auth-url "$URL" >/dev/null || exit 1
+  "$CLI" login remote-browser || exit 1
+fi
+
+exec "$CLI" "$@"
