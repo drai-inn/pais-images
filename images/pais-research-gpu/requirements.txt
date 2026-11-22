@@ -1,0 +1,25 @@
+# The GPU / ML stack in pais-research-gpu, installed into the default Python. Top-level pins only;
+# uv resolves the rest. All have Linux x86_64 wheels for Python 3.14 (checked 2026-11-23).
+# Bump these and images/pais-research-gpu/VERSION together.
+
+# PyTorch (bundles its CUDA 13 runtime) and its companions
+torch==2.15.0
+torchvision==0.29.2
+torchaudio==2.11.1
+
+# Numerical and data
+numpy==2.5.5
+scipy==1.18.1
+pandas==3.1.1
+scikit-learn==1.9.1
+matplotlib==3.11.2
+
+# Hugging Face
+transformers==5.24.0
+accelerate==1.16.0
+datasets==5.2.0
+safetensors==0.8.0
+
+# Training logs, and the Jupyter kernel
+tensorboard==2.21.0
+ipykernel==7.4.0

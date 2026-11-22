@@ -1,0 +1,102 @@
+#!/usr/bin/env bash
+# uoa-drive -- reach UoA research drives from a PAIS Workspace, through your own UoA VPN session.
+#
+#   uoa-drive setup          once: rclone remotes uoa-rd and uoa-files with your UoA login
+#   uoa-drive up [--socks]   start the VPN (asks your UoA password, then your MFA code), then runs
+#                            in the background
+#   uoa-drive status         is it up, and do the drive servers answer
+#   uoa-drive down           end the VPN session
+#
+# Then, for example:
+#   rclone lsf uoa-rd:<drive>                            research.drive.auckland.ac.nz
+#   rclone lsf uoa-files:research/<drive>                files.auckland.ac.nz (older Unifiles)
+#   rclone copy uoa-rd:<drive>/data /workspaces/$RUNAI_PROJECT/data -P
+#
+# How: openconnect (FortiGate) connects to the UoA VPN as you, with your password and MFA code. No
+# tun device or root: its traffic goes to ocproxy, which serves the drive servers' SMB port on
+# localhost inside this Workspace only (4445 research.drive, 4446 files). Nothing else on campus is
+# reachable, unless --socks also opens a SOCKS5 proxy on localhost:1080 (ssh/rsync/curl to campus).
+# The session lasts until `down`, until the gateway ends it, or until the Workspace stops.
+#
+# Your UoA user is your UPI: $UOA_UPI if set, else your PAIS username.
+set -euo pipefail
+
+VPN_HOST=${UOA_VPN_HOST:-connectvpn.auckland.ac.nz}
+VPN_GROUP=${UOA_VPN_GROUP:-client}                 # the FortiGate realm (openfortivpn's `realm`)
+RD_HOST=research.drive.auckland.ac.nz
+FILES_HOST=files.auckland.ac.nz
+RD_PORT=4445
+FILES_PORT=4446
+SOCKS_PORT=1080
+UPI=${UOA_UPI:-${USER:-$(id -un)}}
+STATE=${XDG_RUNTIME_DIR:-/tmp}/uoa-drive-$(id -u)
+PIDFILE=$STATE/openconnect.pid
+
+die() { echo "uoa-drive: $*" >&2; exit 1; }
+running() { [ -f "$PIDFILE" ] && kill -0 "$(cat "$PIDFILE")" 2>/dev/null; }
+# First IPv4 address of a name (the drive servers' names resolve to campus addresses in public DNS).
+addr() { getent ahostsv4 "$1" | awk '{print $1; exit}'; }
+answers() { timeout 5 bash -c "exec 3<>/dev/tcp/127.0.0.1/$1" 2>/dev/null; }
+
+case ${1:-} in
+  up)
+    socks=0
+    [ "${2:-}" = "--socks" ] && socks=1
+    if running; then echo "Already up (pid $(cat "$PIDFILE"))."; exit 0; fi
+    command -v openconnect >/dev/null && command -v ocproxy >/dev/null || die "openconnect/ocproxy missing: use the pais-research image"
+    rd=$(addr "$RD_HOST") || true
+    files=$(addr "$FILES_HOST") || true
+    [ -n "$rd" ] && [ -n "$files" ] || die "can't resolve $RD_HOST / $FILES_HOST"
+    fwd="-L $RD_PORT:$rd:445 -L $FILES_PORT:$files:445"
+    [ $socks = 1 ] && fwd="$fwd -D $SOCKS_PORT"
+    mkdir -p "$STATE" && chmod 700 "$STATE"
+    echo "UoA VPN as $UPI: enter your UoA password, then your MFA code when asked."
+    # --no-dtls: the FortiGate's DTLS heartbeats are logged as errors every few seconds; TLS is enough.
+    # --background: after login it detaches and keeps running; --pid-file lets `down` find it.
+    openconnect --protocol=fortinet --user="$UPI" --usergroup="$VPN_GROUP" --no-dtls --quiet \
+      --background --pid-file="$PIDFILE" \
+      --script-tun --script "ocproxy $fwd" \
+      "$VPN_HOST" || die "the VPN did not come up"
+    for _ in 1 2 3 4 5 6 7 8 9 10; do answers $RD_PORT && break; sleep 1; done
+    echo "Up. research.drive -> localhost:$RD_PORT, files -> localhost:$FILES_PORT$([ $socks = 1 ] && echo ", SOCKS5 localhost:$SOCKS_PORT")"
+    [ -f "${RCLONE_CONFIG:-$HOME/.config/rclone/rclone.conf}" ] && grep -q '^\[uoa-rd\]' "${RCLONE_CONFIG:-$HOME/.config/rclone/rclone.conf}" \
+      || echo "No rclone remotes yet: run  uoa-drive setup"
+    ;;
+  down)
+    running || { echo "Not up."; rm -f "$PIDFILE"; exit 0; }
+    kill -INT "$(cat "$PIDFILE")"            # SIGINT: openconnect logs the session off, then exits
+    for _ in 1 2 3 4 5 6 7 8 9 10; do running || break; sleep 1; done
+    running && kill -TERM "$(cat "$PIDFILE")"
+    rm -f "$PIDFILE"
+    echo "Down."
+    ;;
+  status)
+    if running; then
+      echo "Up (pid $(cat "$PIDFILE")), as $UPI."
+      for p in "$RD_PORT research.drive" "$FILES_PORT files"; do
+        set -- $p
+        if answers "$1"; then echo "  localhost:$1 ($2): listening"; else echo "  localhost:$1 ($2): not answering"; fi
+      done
+    else
+      echo "Down."
+    fi
+    ;;
+  setup)
+    command -v rclone >/dev/null || die "rclone missing"
+    read -r -p "UoA username (UPI) [$UPI]: " u; UPI=${u:-$UPI}
+    read -r -s -p "UoA password (stored obscured in your rclone config): " pw; echo
+    [ -n "$pw" ] || die "no password given"
+    for r in "uoa-rd $RD_PORT" "uoa-files $FILES_PORT"; do
+      set -- $r
+      rclone config create "$1" smb host=localhost port="$2" user="$UPI" domain=uoa pass="$pw" --obscure >/dev/null
+      echo "rclone remote $1 -> localhost:$2"
+    done
+    unset pw
+    chmod 600 "${RCLONE_CONFIG:-$HOME/.config/rclone/rclone.conf}" 2>/dev/null || true
+    echo "Done. With the VPN up:  rclone lsf uoa-rd:<drive>   or   rclone lsf uoa-files:research/<drive>"
+    ;;
+  *)
+    sed -n '2,13p' "$0" | sed 's/^# \{0,1\}//'
+    exit 2
+    ;;
+esac

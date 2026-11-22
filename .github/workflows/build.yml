@@ -31,6 +31,8 @@ jobs:
     outputs:
       python-base: ${{ steps.filter.outputs.python-base }}
       pais-base: ${{ steps.filter.outputs.pais-base }}
+      pais-research: ${{ steps.filter.outputs.pais-research }}
+      pais-research-gpu: ${{ steps.filter.outputs.pais-research-gpu }}
       slicer-desktop: ${{ steps.filter.outputs.slicer-desktop }}
       runai-mcp-server: ${{ steps.filter.outputs.runai-mcp-server }}
       nfs-server: ${{ steps.filter.outputs.nfs-server }}
@@ -45,6 +47,10 @@ jobs:
               - 'images/python-base/**'
             pais-base:
               - 'images/pais-base/**'
+            pais-research:
+              - 'images/pais-research/**'
+            pais-research-gpu:
+              - 'images/pais-research-gpu/**'
             slicer-desktop:
               - 'images/slicer-desktop/**'
             runai-mcp-server:
@@ -120,6 +126,88 @@ jobs:
           labels: ${{ steps.meta.outputs.labels }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
+
+  # pais-base plus research-drive access (UoA VPN tools, rclone) and admin tools. Like pais-base: only when its own
+  # folder changes, tagged with its VERSION.
+  pais-research:
+    needs: changes
+    if: needs.changes.outputs.pais-research == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - id: version
+        run: echo "version=$(tr -d '[:space:]' < images/pais-research/VERSION)" >> "$GITHUB_OUTPUT"
+
+      - uses: docker/setup-buildx-action@v4
+
+      - uses: docker/login-action@v4
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - id: meta
+        uses: docker/metadata-action@v6
+        with:
+          images: ghcr.io/drai-inn/pais-images/pais-research
+          tags: |
+            type=raw,value=${{ steps.version.outputs.version }}
+            type=sha
+
+      - uses: docker/build-push-action@v7
+        with:
+          context: images/pais-research
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha,scope=pais-research
+          cache-to: type=gha,scope=pais-research,mode=max
+
+  # pais-research plus the GPU/ML Python stack. Built on the pais-research version in images/pais-research/VERSION,
+  # after that job when both change in one push. Only when its own folder changes: to move it onto a new pais-research,
+  # bump images/pais-research-gpu/VERSION too. Several GB: free the runner's disk first, and no GHA layer cache
+  # (it would fill the repository's 10 GB cache and evict the other images').
+  pais-research-gpu:
+    needs: [changes, pais-research]
+    if: always() && needs.changes.outputs.pais-research-gpu == 'true' && (needs.pais-research.result == 'success' || needs.pais-research.result == 'skipped')
+    runs-on: ubuntu-latest
+    steps:
+      - name: Free disk space
+        run: |
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache/CodeQL
+          df -h /
+
+      - uses: actions/checkout@v7
+
+      - id: version
+        run: |
+          echo "version=$(tr -d '[:space:]' < images/pais-research-gpu/VERSION)" >> "$GITHUB_OUTPUT"
+          echo "base=ghcr.io/drai-inn/pais-images/pais-research:$(tr -d '[:space:]' < images/pais-research/VERSION)" >> "$GITHUB_OUTPUT"
+
+      - uses: docker/setup-buildx-action@v4
+
+      - uses: docker/login-action@v4
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - id: meta
+        uses: docker/metadata-action@v6
+        with:
+          images: ghcr.io/drai-inn/pais-images/pais-research-gpu
+          tags: |
+            type=raw,value=${{ steps.version.outputs.version }}
+            type=sha
+
+      - uses: docker/build-push-action@v7
+        with:
+          context: images/pais-research-gpu
+          build-args: BASE=${{ steps.version.outputs.base }}
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
 
   slicer-desktop:
     needs: changes
