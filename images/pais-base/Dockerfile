@@ -149,11 +149,13 @@ ENV TZ=Pacific/Auckland \
 RUN apt-get update \
  && apt-get upgrade --yes \
  && apt-get install --yes --no-install-recommends \
+      acl \
       aria2 \
       autoconf \
       automake \
       bash-completion \
       bc \
+      bind9-dnsutils \
       bison \
       btop \
       build-essential \
@@ -209,6 +211,7 @@ RUN apt-get update \
       ripgrep \
       rsync \
       screen \
+      sqlite3 \
       strace \
       swig \
       sysstat \

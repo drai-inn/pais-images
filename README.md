@@ -58,6 +58,8 @@ Workspaces that run as the person's FreeIPA uid. Used by the `ubuntu-shell` Run:
 - **Browser tools:** JupyterLab, code-server, ttyd and File Browser Quantum. Nothing starts by itself: the template's
   start-up runs the ones it exposes.
 - **Coding agents:** opencode and pi (with the PAIS provider), Claude Code.
+- **Small tools:** `acl` (`getfacl`, `setfacl`: the read-all ACLs on `/workspaces`), `bind9-dnsutils` (`dig`,
+  `nslookup`), `sqlite3`.
 - **Remote access:** `openssh-server` and `openssh-sftp-server` (for `sshd -i` as the person; no host keys in the
   image), `websocat`, `gh`.
 - **Names:** `libnss-wrapper`. The uid has no entry in `/etc/passwd`; the start-up writes passwd and group copies in
