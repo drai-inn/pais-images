@@ -497,14 +497,6 @@ RUN mkdir -p /opt/claude-code \
  && chmod 0755 /usr/local/bin/claude \
  && claude --version
 
-# --- Run:ai CLI helper ----------------------------------------------------------------------------
-# NVIDIA's CLI isn't redistributed in this public image. /usr/local/bin/runai runs the person's own copy
-# from ~/.runai/bin (installed once from the Run:ai UI) and, the first time, points it at PAIS_RUNAI_URL and
-# starts the login. PAIS_RUNAI_URL comes from the Workspace template (per environment, like LLM_API_BASE),
-# not from the image, so one image serves dev and prod; without it the person sets the address themselves.
-COPY --chmod=0755 runai /usr/local/bin/runai
-RUN bash -n /usr/local/bin/runai
-
 # Last, so the build's own RUN steps don't source env.sh.
 ENV BASH_ENV=/etc/pais/env.sh
 

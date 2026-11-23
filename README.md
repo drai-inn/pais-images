@@ -58,9 +58,6 @@ Workspaces that run as the person's FreeIPA uid. Used by the `ubuntu-shell` Run:
 - **Browser tools:** JupyterLab, code-server, ttyd and File Browser Quantum. Nothing starts by itself: the template's
   start-up runs the ones it exposes.
 - **Coding agents:** opencode and pi (with the PAIS provider), Claude Code.
-- **Run:ai CLI:** `runai` runs the person's own CLI from `~/.runai/bin` (NVIDIA's CLI isn't redistributed here; it
-  tells them how to install it from the Run:ai UI) and, the first time, points it at `PAIS_RUNAI_URL` (set by the
-  Workspace template, per environment) and logs them in.
 - **Small tools:** `acl` (`getfacl`, `setfacl`: the read-all ACLs on `/workspaces`), `bind9-dnsutils` (`dig`,
   `nslookup`), `sqlite3`.
 - **Remote access:** `openssh-server` and `openssh-sftp-server` (for `sshd -i` as the person; no host keys in the
