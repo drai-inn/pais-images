@@ -466,17 +466,13 @@ ENV OPENCODE_CONFIG=/etc/pais/opencode.json
 # and nothing is written to the home. A pi the researcher installs themselves (npm -g lands in
 # ~/.local, ahead on PATH) runs without the wrapper and so without the provider.
 #
-# The extension: /opt/pais/pi/pais.ts when the shared /opt/pais area has one (changeable without an image
-# release; design: pais-deploy-dev docs/runai-mt/opt-pais.md), else this built-in copy. The built-in copy is
-# outside /opt/pais because the shared folder is mounted over that path and would hide it.
-#
 # PI_SKIP_VERSION_CHECK hides the "update available" notice for this root-owned copy. Not
 # PI_OFFLINE: that also stops pi installing and updating the researcher's own pi packages.
 ARG PI_VERSION=1.5.2
 RUN npm install -g --prefix /usr/local "@earendil-works/pi-coding-agent@${PI_VERSION}" \
  && npm cache clean --force \
  && rm /usr/local/bin/pi
-COPY pi/pais.ts /usr/local/lib/pais/pi/pais.ts
+COPY pi/pais.ts /opt/pais/pi/pais.ts
 COPY --chmod=0755 pi/pi /usr/local/bin/pi
 RUN pi --version
 ENV PI_SKIP_VERSION_CHECK=1 \
@@ -504,7 +500,8 @@ RUN mkdir -p /opt/claude-code \
 # --- Run:ai CLI helper ----------------------------------------------------------------------------
 # NVIDIA's CLI isn't redistributed in this public image. /usr/local/bin/runai runs the person's own copy
 # from ~/.runai/bin (installed once from the Run:ai UI) and, the first time, points it at PAIS_RUNAI_URL and
-# starts the login. PAIS_RUNAI_URL is set per environment by /opt/pais/etc/env.sh, not baked in here.
+# starts the login. PAIS_RUNAI_URL comes from the Workspace template (per environment, like LLM_API_BASE),
+# not from the image, so one image serves dev and prod; without it the person sets the address themselves.
 COPY --chmod=0755 runai /usr/local/bin/runai
 RUN bash -n /usr/local/bin/runai
 

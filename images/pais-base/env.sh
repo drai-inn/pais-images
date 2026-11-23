@@ -66,13 +66,3 @@ esac
 # numerical code. It covers this process's main thread and its children; OpenMP workers take
 # OMP_STACKSIZE.
 ulimit -s unlimited 2>/dev/null || true
-
-# Shared settings from /opt/pais, applied on top of these: a read-only folder on VAST mounted into every
-# Workspace, changed by the platform team without an image release (design: pais-deploy-dev
-# docs/runai-mt/opt-pais.md). It sets what differs per environment, e.g. PAIS_RUNAI_URL for `runai`, and
-# puts /opt/pais/bin last on PATH. Every bash process and the start-up read this file, so a problem there must
-# never stop a shell: the shared file is skipped when it is missing or unreadable, when it isn't valid sh
-# (`sh -n`), or when PAIS_NO_SHARED_ENV=1 (a way out for debugging).
-if [ "${PAIS_NO_SHARED_ENV:-}" != 1 ] && [ -r /opt/pais/etc/env.sh ] && sh -n /opt/pais/etc/env.sh 2>/dev/null; then
-  . /opt/pais/etc/env.sh
-fi

@@ -3,8 +3,8 @@
 #
 # NVIDIA's CLI is not redistributed in this public image. Each person installs it once, from the
 # Run:ai UI, into their home (which follows them into every Workspace). This helper then runs it,
-# points a new install at this environment's control plane ($PAIS_RUNAI_URL, set per environment by
-# /opt/pais/etc/env.sh) and, the first time, starts the login.
+# points a new install at this environment's control plane ($PAIS_RUNAI_URL, injected by the Workspace
+# template per environment) and, the first time, starts the login.
 CLI=$HOME/.runai/bin/runai
 URL=${PAIS_RUNAI_URL:-}
 
