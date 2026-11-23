@@ -57,14 +57,22 @@ Workspaces that run as the person's FreeIPA uid. Used by the `ubuntu-shell` Run:
 - **GPU monitoring:** `nvtop`, `nvitop`.
 - **Browser tools:** JupyterLab, code-server, ttyd and File Browser Quantum. Nothing starts by itself: the template's
   start-up runs the ones it exposes.
-- **Coding agents:** opencode and pi (with the PAIS provider), Claude Code.
+- **Coding agents:** opencode and pi (with the PAIS provider: `/opt/pais/pi/pais.ts` when the shared area has one,
+  else the built-in copy in `/usr/local/lib/pais/pi/`), Claude Code.
+- **Run:ai CLI:** `runai` runs the person's own CLI from `~/.runai/bin` (NVIDIA's CLI isn't redistributed here; it
+  tells them how to install it from the Run:ai UI) and, the first time, points it at `PAIS_RUNAI_URL` and logs them in.
+- **Small tools:** `acl` (`getfacl`, `setfacl`: the read-all ACLs on `/workspaces`), `bind9-dnsutils` (`dig`,
+  `nslookup`), `sqlite3`.
 - **Remote access:** `openssh-server` and `openssh-sftp-server` (for `sshd -i` as the person; no host keys in the
   image), `websocat`, `gh`.
 - **Names:** `libnss-wrapper`. The uid has no entry in `/etc/passwd`; the start-up writes passwd and group copies in
   `/tmp` and the template preloads the library.
 - **Per-Workspace settings:** `/etc/pais/env.sh` sets thread caps from the cgroup CPU limit, `~/.local/bin` first on
   `PATH`, `USER`/`LOGNAME`, a per-Workspace `OPENCODE_DB` and an unlimited stack. It is sourced by interactive bash
-  (`/etc/bash.bashrc`), non-interactive bash (`BASH_ENV`) and the start-up.
+  (`/etc/bash.bashrc`), non-interactive bash (`BASH_ENV`) and the start-up. Since v5 it then loads
+  `/opt/pais/etc/env.sh`, the shared settings of the platform's read-only `/opt/pais` area (design:
+  `ASISolutions/pais-deploy-dev`, `docs/runai-mt/opt-pais.md`), unless that file is missing, isn't valid `sh`, or
+  `PAIS_NO_SHARED_ENV=1`. Without `/opt/pais` the image behaves as v4.
 - **Locale:** `en_NZ.UTF-8`, timezone `Pacific/Auckland`.
 - **Pinning:** release downloads by version and SHA-256 (ARGs in the Dockerfile), images by digest. Apt packages are
   not pinned.

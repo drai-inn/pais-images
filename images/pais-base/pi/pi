@@ -5,4 +5,7 @@ real=/usr/local/lib/node_modules/@earendil-works/pi-coding-agent/dist/bundle/cli
 case "$1" in
   install | uninstall | remove | update | list | config | mcp) exec node "$real" "$@" ;;
 esac
-exec node "$real" -e /opt/pais/pi/pais.ts "$@"
+# The PAIS provider: the shared /opt/pais copy when there is one, else the one built into the image.
+ext=/opt/pais/pi/pais.ts
+[ -r "$ext" ] || ext=/usr/local/lib/pais/pi/pais.ts
+exec node "$real" -e "$ext" "$@"
