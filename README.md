@@ -65,10 +65,12 @@ Workspaces that run as the person's FreeIPA uid. Used by the `ubuntu-shell` Run:
 - **Names:** `libnss-wrapper`. The uid has no entry in `/etc/passwd`; the start-up writes passwd and group copies in
   `/tmp` and the template preloads the library.
 - **Per-Workspace settings:** `/etc/pais/env.sh` sets thread caps from the cgroup CPU limit, `~/.local/bin` first on
-  `PATH`, `USER`/`LOGNAME`, a per-Workspace `OPENCODE_DB`, an unlimited stack and umask `002` (from v6; only over
-  the default `022`, so a person's own umask is kept). It is sourced by interactive bash
+  `PATH`, `USER`/`LOGNAME`, a per-Workspace `OPENCODE_DB` and an unlimited stack. It is sourced by interactive bash
   (`/etc/bash.bashrc`), non-interactive bash (`BASH_ENV`) and the start-up.
 - **Locale:** `en_NZ.UTF-8`, timezone `Pacific/Auckland`.
+- **umask:** the standard `022`, nothing sets another (v6's `002` was taken out in v7: sshd forces at least `022`
+  on its sessions and Training jobs run no shell, so `002` couldn't be the same everywhere). People who want
+  group-writable files put `umask 002` in their own `~/.bashrc`.
 - **Pinning:** release downloads by version and SHA-256 (ARGs in the Dockerfile), images by digest. Apt packages are
   not pinned.
 - **Tags:** the contents of `images/pais-base/VERSION` (e.g. `pais-base-v1`) and `sha-<git>`. No `latest`: the template
