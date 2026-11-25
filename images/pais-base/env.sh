@@ -21,6 +21,14 @@ if read -r q p 2>/dev/null </sys/fs/cgroup/cpu.max && [ "$q" != max ]; then
 fi
 unset q p
 
+# Group-writable new files by default (umask 002), the same at every way in: the browser Terminal
+# already ran 002, while sshd resets each session to 022 and a container starts at 022. Project folders
+# (/workspaces/<project>, setgid 2770) are shared by the project, and each person's own group is private
+# (GID = UID, nobody else in it), so 002 opens nothing in a home. Only when the umask is still the
+# default 022: one a person set (077, 027...) is kept, in shells started from theirs too. This file runs
+# before ~/.bashrc and ~/.profile, so a umask set there wins in interactive shells.
+[ "$(umask)" != 0022 ] || umask 002
+
 # uv tools, `uv python install --default` and `npm -g` (via /usr/local/etc/npmrc) land in
 # ~/.local/bin; first on PATH so the researcher's own copies win over the image's.
 case ":$PATH:" in
